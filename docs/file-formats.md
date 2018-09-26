@@ -64,3 +64,26 @@ internal prefix="PROJECT"
 The above shows the two cases where quoting variable names is required: if they
 contain spaces (or other unusual characters), or if they wish to use the `${}`
 or `$()` constructs for any reason.
+
+## driven inheritance 
+
+`.driven` files, by default, inherit.
+
+That is to say, if you have a directory tree like the following:
+
+```
+$HOME
+├── .driven
+└── foo
+    ├── .driven
+    └── bar
+        └── .driven
+```
+
+All three `.driven` files will be applied and merged if you are in the `bar` directory (or any deeper directory than it).
+
+If any define duplicate variable names, the one deepest in the directory tree takes precedence.
+
+### Inheritance related keywords
+
+The `.driven` format understands the `ignore_parents` keyword to suppress any `.driven` files further up the directory tree. 
