@@ -1,0 +1,8 @@
+[package]
+name = "driven_parser"
+version = "0.1.0"
+authors = ["Euan Kemp <euan@ngrok.com>"]
+edition = "2018"
+
+[dependencies]
+nom = "5"
