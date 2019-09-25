@@ -5,7 +5,7 @@ use nom::{
     bytes::complete::{escaped_transform, is_not, tag, take, take_while1},
     character::complete::{char, multispace0, one_of, space0},
     combinator::{cut, map, map_parser, map_res},
-    error::{context, ErrorKind, ParseError},
+    error::{context, ErrorKind, ParseError, VerboseError},
     multi,
     sequence::{preceded, terminated},
     IResult,
@@ -38,18 +38,18 @@ fn str_part<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, StringPa
     map(string_lit, |s: String| StringPart::Literal(s))(i)
 }
 
-fn is_variable_char(i: &str) -> IResult<&str, &str> {
+fn is_variable_char<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, &'a str, E> {
     take_while1(move |c: char| c.is_alphanumeric() || c == '_')(i)
 }
 
-fn unquoted_variable_name(i: &str) -> IResult<&str, StringRef> {
+fn unquoted_variable_name<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, StringRef, E> {
     let varname = is_variable_char;
     map(varname, |s: &str| StringRef {
         parts: vec![StringPart::Literal(s.to_string())],
     })(i)
 }
 
-fn quoted_string(i: &str) -> IResult<&str, StringRef> {
+fn quoted_string<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, StringRef, E> {
     let refparser = context(
         "string",
         preceded(char('\"'), cut(terminated(str_part, char('\"')))),
@@ -58,7 +58,7 @@ fn quoted_string(i: &str) -> IResult<&str, StringRef> {
     map(refparser, |s: StringPart| StringRef { parts: vec![s] })(i)
 }
 
-fn variable_name(i: &str) -> IResult<&str, StringRef> {
+fn variable_name<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, StringRef, E> {
     alt((unquoted_variable_name, quoted_string))(i)
 }
 
@@ -71,7 +71,7 @@ where
     terminated(preceded(wrapper, first), wrapper)
 }
 
-fn variable_assignment(i: &str) -> IResult<&str, DrivenVar> {
+fn variable_assignment<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, DrivenVar, E> {
     let (i, _) = multispace0(i)?;
     let whitespace_var_name = wrapped(variable_name, space0);
     let internal = wrapped(tag("internal"), space0);
@@ -93,7 +93,7 @@ fn variable_assignment(i: &str) -> IResult<&str, DrivenVar> {
     ))
 }
 
-fn driven_file(i: &str) -> IResult<&str, DrivenFile> {
+fn driven_file<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, DrivenFile, E> {
     // TODO: ignore_parents and allow_shell_exec
     let (i, vars) = multi::many0(variable_assignment)(i)?;
 
@@ -107,12 +107,28 @@ fn driven_file(i: &str) -> IResult<&str, DrivenFile> {
     ))
 }
 
+pub fn drivenfile(i: &str) -> Result<DrivenFile, String> {
+    match driven_file::<VerboseError<&str>>(i) {
+        Ok((_, f)) => Ok(f),
+        Err(nom::Err::Error(e)) => {
+            Err(nom::error::convert_error(i, e))
+        },
+        Err(nom::Err::Incomplete(_)) => {
+            // we're not using the streaming api
+            panic!("unreachable");
+        }
+        Err(nom::Err::Failure(f)) => {
+            Err(format!("Failure parsing drivenfile: {:?}", f))
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 // DrivenFile is a type representing a single `.driven` file that has been parsed, but has not had
 // all variables resolved.
 // Variable resolution is defered because a .driven file may reference variables defined in other
 // files and in the environment itself, so we cannot yet evaluate those references.
-struct DrivenFile<'a> {
+pub struct DrivenFile<'a> {
     ignore_parents: bool,
     allow_shell_exec: bool,
     variables: Vec<DrivenVar<'a>>,
@@ -138,11 +154,13 @@ struct StringRef<'a> {
 
 mod test {
     use super::*;
-    use nom::Err;
 
+    fn litpart(s: &str) -> StringPart {
+        StringPart::Literal(s.to_string())
+    }
     fn lit(s: &str) -> StringRef {
         StringRef {
-            parts: vec![StringPart::Literal(s.to_string())],
+            parts: vec![litpart(s)],
         }
     }
 
@@ -150,35 +168,35 @@ mod test {
     fn str_part_test() {
         assert_eq!(
             str_part::<()>("foo"),
-            Ok(("", StringPart::Literal("foo".to_string())))
+            Ok(("", litpart("foo")))
         );
         assert_eq!(
             str_part::<()>(r#"foo\"a"#),
-            Ok(("", StringPart::Literal(r#"foo"a"#.to_string())))
+            Ok(("", litpart(r#"foo"a"#)))
         );
         assert_eq!(
             str_part::<()>(r#"foo\\foo"#),
-            Ok(("", StringPart::Literal(r#"foo\foo"#.to_string())))
+            Ok(("", litpart(r#"foo\foo"#)))
         );
         assert_eq!(
             str_part::<()>("ご飯"),
-            Ok(("", StringPart::Literal("ご飯".to_string())))
+            Ok(("", litpart("ご飯")))
         );
         assert_eq!(
             str_part::<(&str, ErrorKind)>(r#"foo\1foo"#),
-            Err(Err::Error(("1", ErrorKind::OneOf))),
+            Err(nom::Err::Error(("1", ErrorKind::OneOf))),
         );
     }
 
     #[test]
     fn quoted_str_test() {
-        assert_eq!(quoted_string(r#""foo""#), Ok(("", lit("foo"))),)
+        assert_eq!(quoted_string::<(_, _)>(r#""foo""#), Ok(("", lit("foo"))),)
     }
 
     #[test]
     fn variable_assignment_test() {
         assert_eq!(
-            variable_assignment(r#"foo="bar""#),
+            variable_assignment::<(_, _)>(r#"foo="bar""#),
             Ok((
                 "",
                 DrivenVar {
@@ -189,7 +207,7 @@ mod test {
             ))
         );
         assert_eq!(
-            variable_assignment(r#""foo"="bar""#),
+            variable_assignment::<(_, _)>(r#""foo"="bar""#),
             Ok((
                 "",
                 DrivenVar {
@@ -200,7 +218,7 @@ mod test {
             ))
         );
         assert_eq!(
-            variable_assignment(r#" "foo" = "bar" "#),
+            variable_assignment::<(_, _)>(r#" "foo" = "bar" "#),
             Ok((
                 "",
                 DrivenVar {
@@ -211,7 +229,7 @@ mod test {
             ))
         );
         assert_eq!(
-            variable_assignment(r#" internal "foo" = "bar" "#),
+            variable_assignment::<(_, _)>(r#" internal "foo" = "bar" "#),
             Ok((
                 "",
                 DrivenVar {
@@ -221,6 +239,6 @@ mod test {
                 }
             ))
         );
-        assert!(variable_assignment(" foo = \n \"bar\" ").is_err(),);
+        assert!(variable_assignment::<(_, _)>(" foo = \n \"bar\" ").is_err(),);
     }
 }
