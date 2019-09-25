@@ -129,27 +129,44 @@ pub fn drivenfile(i: &str) -> Result<DrivenFile, String> {
 // Variable resolution is defered because a .driven file may reference variables defined in other
 // files and in the environment itself, so we cannot yet evaluate those references.
 pub struct DrivenFile<'a> {
-    ignore_parents: bool,
-    allow_shell_exec: bool,
-    variables: Vec<DrivenVar<'a>>,
+    pub ignore_parents: bool,
+    pub allow_shell_exec: bool,
+    pub variables: Vec<DrivenVar<'a>>,
 }
 
 #[derive(Debug, PartialEq)]
-struct DrivenVar<'a> {
-    internal: bool,
-    name: StringRef<'a>,
-    value: StringRef<'a>,
+pub struct DrivenVar<'a> {
+    pub internal: bool,
+    pub name: StringRef<'a>,
+    pub value: StringRef<'a>,
 }
 
 #[derive(Debug, PartialEq)]
-enum StringPart<'a> {
+pub enum StringPart<'a> {
     Literal(String),
     Variable(&'a str),
 }
 
 #[derive(Debug, PartialEq)]
-struct StringRef<'a> {
+pub struct StringRef<'a> {
     parts: Vec<StringPart<'a>>,
+}
+
+impl<'a> StringRef<'a> {
+    pub fn resolve(&self) -> String {
+        let mut res = String::new();
+        for part in &self.parts {
+            match part {
+                StringPart::Literal(s) => {
+                    res.push_str(s)
+                }
+                StringPart::Variable(v) => {
+                    panic!("TODO");
+                }
+            }
+        }
+        res
+    }
 }
 
 mod test {

@@ -1,0 +1,12 @@
+[package]
+name = "driven"
+version = "0.1.0"
+authors = ["Euan Kemp <euan@ngrok.com>"]
+edition = "2018"
+
+[dependencies]
+clap = "2"
+driven_parser = { path = "./driven_parser" }
+env_logger = "*"
+log = "*"
+libc = "*"
