@@ -40,10 +40,15 @@ fn run() -> Result<(), i32> {
                 .setting(AppSettings::Hidden)
                 .setting(AppSettings::DisableHelpSubcommand)
                 .about("visit a directory, export variables")
-                .arg(Arg::with_name("shell").long("shell").takes_value(true).help(&format!(
-                    "the shell to print initialization code for: one of {}",
-                    SUPPORTED_SHELLS.join(", ")
-                )))
+                .arg(
+                    Arg::with_name("shell")
+                        .long("shell")
+                        .takes_value(true)
+                        .help(&format!(
+                            "the shell to print initialization code for: one of {}",
+                            SUPPORTED_SHELLS.join(", ")
+                        )),
+                )
                 .arg(Arg::with_name("dir_target")),
         )
         .get_matches();
@@ -93,17 +98,13 @@ fn handle_init(cmd: &ArgMatches) -> Result<(), i32> {
 fn handle_visit(cmd: &ArgMatches) -> Result<(), i32> {
     let shell = shells::from_name(cmd.value_of("shell").unwrap()).unwrap();
     match cmd.value_of("dir_target") {
-        Some(dir) => {
-            match visit::visit(shell, &mut std::io::stdout(), dir) {
-                Err(e) => {
-                    error!("{}", e);
-                    Err(1)
-                }
-                Ok(_) => {
-                    Ok(())
-                }
+        Some(dir) => match visit::visit(shell, &mut std::io::stdout(), dir) {
+            Err(e) => {
+                error!("{}", e);
+                Err(1)
             }
-        }
+            Ok(_) => Ok(()),
+        },
         None => {
             error!("{}\n\nvisit requires an argument", cmd.usage());
             Err(1)

@@ -2,7 +2,7 @@ use driven_parser;
 use log::debug;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Write, Read};
+use std::io::{Read, Write};
 use std::path::Path;
 
 use crate::shells::Shell;
