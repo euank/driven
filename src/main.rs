@@ -1,10 +1,10 @@
 mod shells;
 mod visit;
 
+use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use env_logger;
 use libc;
-use clap::{App, Arg, SubCommand, ArgMatches, AppSettings};
-use log::debug;
+use log::{debug, error};
 
 use shells::SUPPORTED_SHELLS;
 
@@ -12,7 +12,7 @@ fn main() {
     match run() {
         Ok(()) => {
             std::process::exit(0);
-        },
+        }
         Err(code) => {
             std::process::exit(code);
         }
@@ -39,8 +39,12 @@ fn run() -> Result<(), i32> {
                 // used by the shell hooks internally, it shouldn't be called directly
                 .setting(AppSettings::Hidden)
                 .setting(AppSettings::DisableHelpSubcommand)
-                .about("Add or visit a directory in the frecency database")
-                .arg(Arg::with_name("dir_target"))
+                .about("visit a directory, export variables")
+                .arg(Arg::with_name("shell").long("shell").takes_value(true).help(&format!(
+                    "the shell to print initialization code for: one of {}",
+                    SUPPORTED_SHELLS.join(", ")
+                )))
+                .arg(Arg::with_name("dir_target")),
         )
         .get_matches();
 
@@ -58,12 +62,8 @@ fn run() -> Result<(), i32> {
     }
 
     match flags.subcommand() {
-        ("init", Some(init)) => {
-            handle_init(init)
-        },
-        ("visit", Some(visit)) => {
-            handle_visit(visit)
-        },
+        ("init", Some(init)) => handle_init(init),
+        ("visit", Some(visit)) => handle_visit(visit),
         _ => {
             println!("unrecognized subcommand");
             Err(1)
@@ -91,19 +91,25 @@ fn handle_init(cmd: &ArgMatches) -> Result<(), i32> {
 }
 
 fn handle_visit(cmd: &ArgMatches) -> Result<(), i32> {
+    let shell = shells::from_name(cmd.value_of("shell").unwrap()).unwrap();
     match cmd.value_of("dir_target") {
-        Some(dir) =>  {
-            let res = visit::visit(dir);
-            println!("variables: {:?}", res);
-            Ok(())
-        },
+        Some(dir) => {
+            match visit::visit(shell, &mut std::io::stdout(), dir) {
+                Err(e) => {
+                    error!("{}", e);
+                    Err(1)
+                }
+                Ok(_) => {
+                    Ok(())
+                }
+            }
+        }
         None => {
-            println!("{}\n\nvisit requires an argument", cmd.usage());
+            error!("{}\n\nvisit requires an argument", cmd.usage());
             Err(1)
         }
     }
 }
-
 
 fn intercept_ctrl_c() -> Result<(), ()> {
     // When Pazi is run from a script or shell function,

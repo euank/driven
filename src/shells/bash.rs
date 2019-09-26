@@ -1,4 +1,5 @@
 use super::Shell;
+use std::io::Write;
 
 pub struct Bash;
 
@@ -10,11 +11,16 @@ impl Shell for Bash {
 __driven_add_dir() {
     # TODO: should driven keep track of this itself in its datadir?
     if [[ "${__DRIVEN_LAST_PWD:-}" != "${PWD}" ]]; then
-        driven visit "${PWD}"
+        source <(driven visit --shell zsh "${PWD}")
     fi
     __DRIVEN_LAST_PWD="${PWD}"
 }
 "#
         )
+    }
+
+    fn export_var(&self, cmdfd: &mut dyn Write, name: &str, val: &str) -> Result<(), String> {
+        write!(cmdfd, "export {}={}\n", name, val)
+            .map_err(|e| format!("error writing to cmdfd: {}", e))
     }
 }
