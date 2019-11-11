@@ -1,5 +1,7 @@
 extern crate nom;
 
+use std::collections::HashMap;
+
 use nom::{
     branch::alt,
     bytes::complete::{escaped_transform, is_not, tag, take, take_while1},
@@ -108,10 +110,10 @@ fn driven_file<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Drive
 }
 
 pub fn drivenfile(i: &str) -> Result<DrivenFile, String> {
-    match driven_file::<VerboseError<&str>>(i) {
+    match driven_file::<VerboseError<&str>>(&i) {
         Ok((_, f)) => Ok(f),
         Err(nom::Err::Error(e)) => {
-            Err(nom::error::convert_error(i, e))
+            Err(nom::error::convert_error(&i, e))
         },
         Err(nom::Err::Incomplete(_)) => {
             // we're not using the streaming api
@@ -123,36 +125,85 @@ pub fn drivenfile(i: &str) -> Result<DrivenFile, String> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 // DrivenFile is a type representing a single `.driven` file that has been parsed, but has not had
 // all variables resolved.
 // Variable resolution is defered because a .driven file may reference variables defined in other
 // files and in the environment itself, so we cannot yet evaluate those references.
-pub struct DrivenFile<'a> {
+pub struct DrivenFile {
     pub ignore_parents: bool,
     pub allow_shell_exec: bool,
-    pub variables: Vec<DrivenVar<'a>>,
+    pub variables: Vec<DrivenVar>,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct DrivenVar<'a> {
+#[derive(Debug, PartialEq, Hash, Clone, Eq)]
+pub struct DrivenVar {
     pub internal: bool,
-    pub name: StringRef<'a>,
-    pub value: StringRef<'a>,
+    pub name: StringRef,
+    pub value: StringRef,
 }
 
-#[derive(Debug, PartialEq)]
-pub enum StringPart<'a> {
+pub struct UnresolvedVariablesErr {
+    pub var: String,
+}
+
+impl DrivenVar {
+    pub fn resolve(&self, vars: &HashMap<String, String>) -> Result<(String, String), UnresolvedVariablesErr> {
+        let mut name = String::new();
+        for p in &self.name.parts {
+            match p {
+                StringPart::Literal(s) => name.push_str(&s),
+                StringPart::Variable(v) => {
+                    match vars.get(&v.to_string()) {
+                        None => {
+                            return Err(UnresolvedVariablesErr{
+                                var: v.to_string(),
+                            })
+                        },
+                        Some(s) => {
+                            name += s;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut val = String::new();
+        for p in &self.value.parts {
+            match p {
+                StringPart::Literal(s) => val.push_str(&s),
+                StringPart::Variable(v) => {
+                    match vars.get(&v.to_string()) {
+                        None => {
+                            return Err(UnresolvedVariablesErr{
+                                var: v.to_string(),
+                            })
+                        },
+                        Some(s) => {
+                            val += s;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((name, val))
+    }
+}
+
+
+#[derive(Debug, PartialEq, Hash, Eq, Clone)]
+pub enum StringPart {
     Literal(String),
-    Variable(&'a str),
+    Variable(String),
 }
 
-#[derive(Debug, PartialEq)]
-pub struct StringRef<'a> {
-    parts: Vec<StringPart<'a>>,
+#[derive(Debug, PartialEq, Hash, Eq, Clone)]
+pub struct StringRef {
+    parts: Vec<StringPart>,
 }
 
-impl<'a> StringRef<'a> {
+impl StringRef {
     pub fn resolve(&self) -> String {
         let mut res = String::new();
         for part in &self.parts {

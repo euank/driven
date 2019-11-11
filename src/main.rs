@@ -24,7 +24,13 @@ fn run() -> Result<(), i32> {
         .version("0.1")
         .author("Euan Kemp")
         .about("Set environment variables based on the directory you're in.")
-        .arg(Arg::with_name("debug").help("Enable debug output"))
+        .arg(
+            Arg::with_name("debug")
+            .short("d")
+            .long("debug")
+            .global(true)
+            .help("Enable debug output")
+        )
         .subcommand(
             SubCommand::with_name("init")
                 .about("Prints initialization logic for the given shell to eval")

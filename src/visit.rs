@@ -1,41 +1,142 @@
 use driven_parser;
+use driven_parser::{StringRef, DrivenFile};
 use log::debug;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path};
 
 use crate::shells::Shell;
 
-#[derive(PartialEq, Debug)]
-pub struct VisitResult {
-    pub vars: HashMap<String, String>,
-    // TODO: shell files to process, etc etc
-}
 
 pub fn visit(shell: &dyn Shell, cmdfd: &mut dyn Write, dir: &str) -> Result<(), String> {
-    let top_drivenfile = Path::new(dir).join(".driven");
-    if !top_drivenfile.exists() {
-        debug!("no driven file");
-        // TODO: recurse up
-        return Ok(());
-    }
-    let mut f = fs::File::open(top_drivenfile).map_err(|e| format!("cannot open file: {}", e))?;
-    let mut data = String::new();
-    f.read_to_string(&mut data)
-        .map_err(|e| format!("error reading file: {}", e))?;
+    let res = visit_helper(dir)?;
 
-    let mut exports = HashMap::new();
-    let drivenfile = driven_parser::drivenfile(&data)?;
-    for var in drivenfile.variables {
-        if var.internal {
-            continue;
-        }
-        exports.insert(var.name.resolve(), var.value.resolve());
+    let mut exports = BTreeMap::new();
+    for var in res.vars {
+        exports.insert(var.0, var.1);
     }
 
     for (name, val) in exports {
         shell.export_var(cmdfd, &name, &val)?;
     }
     Ok(())
+}
+
+// VisitResult contains the result of attempting to resolve all driven files from visiting a given
+// directory.
+#[derive(PartialEq, Debug)]
+struct VisitResult {
+    internal_vars: BTreeMap<String, String>,
+    vars: BTreeMap<String, String>,
+}
+
+impl VisitResult {
+    fn add_file(&mut self, file: &DrivenFile) -> Result<(), String> {
+        let mut unresolved_vars = file.variables.clone();
+        while unresolved_vars.len() > 0 {
+            let mut missing_vars: Vec<String> = Vec::new();
+            let mut resolved_indices = Vec::new();
+            for i in 0..unresolved_vars.len() {
+                let var = &unresolved_vars[i];
+                let resolution_target: HashMap<_, _> = self.internal_vars.clone().into_iter().chain(self.vars.clone()).collect();
+                match var.resolve(&resolution_target) {
+                    Ok((name, val)) => {
+                        if var.internal {
+                            debug!("resolved internal var {} = {}", name, val);
+                            self.internal_vars.insert(name, val);
+                        } else {
+                            debug!("resolved var {} = {}", name, val);
+                            self.vars.insert(name, val);
+                        }
+                        resolved_indices.push(i);
+                    }
+                    Err(e) => {
+                        missing_vars.push(e.var);
+                    }
+                }
+            }
+
+            if resolved_indices.len() == 0 {
+                return Err(format!("could not resolve variables: {}", missing_vars.join(", ")));
+            }
+            resolved_indices.reverse();
+            for i in resolved_indices {
+                unresolved_vars.remove(i);
+            }
+        }
+        Ok(())
+    }
+}
+
+// visit a given directory and return a structured VisitResult
+fn visit_helper(dir: &str) -> Result<VisitResult, String> {
+    let mut drivenfiles: Vec<(&Path, _)> = Vec::new();
+
+    let mut remaining_paths = Vec::new();
+    let canon_path = Path::new(dir).canonicalize().map_err(|e| format!("could not canonicalize path: {}", e))?;
+    remaining_paths.push(canon_path.as_path());
+
+    while remaining_paths.len() > 0 {
+        let path = remaining_paths.pop().unwrap();
+        debug!("[visit] trying path {}", path.to_string_lossy());
+        match load_driven_file(path)? {
+            None => {
+                if let Some(parent) = path.parent() {
+                    remaining_paths.push(parent);
+                }
+            }
+            Some(d) => {
+                if !d.ignore_parents {
+                    if let Some(parent) = path.parent() {
+                        remaining_paths.push(parent);
+                    }
+                } else {
+                    debug!("file at path {} requested we ignore parents; not recursing up further", path.to_string_lossy());
+                }
+                drivenfiles.push((&path, d));
+            }
+        }
+    }
+
+    let mut visit_result = VisitResult{
+        internal_vars: BTreeMap::new(),
+        vars: BTreeMap::new(),
+    };
+
+    // Now resolve driven files, root first, with deduping.
+    let mut resolved = BTreeSet::new();
+    drivenfiles.reverse();
+    for file in drivenfiles {
+        if !resolved.insert(file.0) {
+            debug!("skipping {}; already visited", file.0.to_string_lossy());
+            // only process files once.
+            // e.g. if someone has the structure:
+            // /.driven (y = 1)
+            // /foo/.driven (include file "/.driven")
+            // Then don't re-process /.driven after it was included the first time.
+            continue
+        }
+        debug!("visiting {}", file.0.to_string_lossy());
+
+        visit_result.add_file(&file.1)
+            .map_err(|e| format!("error parsing drivenfile {}: {}", file.0.to_string_lossy(), e))?;
+    }
+
+    Ok(visit_result)
+}
+
+fn load_driven_file<'a, 'b>(path: &Path) -> Result<Option<DrivenFile>, String> {
+    let drivenfile = path.join(".driven");
+    if !drivenfile.exists() {
+        debug!("no driven file");
+        return Ok(None)
+    }
+    let mut f = fs::File::open(drivenfile).map_err(|e| format!("cannot open file: {}", e))?;
+    let mut data = String::new();
+    f.read_to_string(&mut data)
+        .map_err(|e| format!("error reading file: {}", e))?;
+
+    let file = driven_parser::drivenfile(&data)?;
+    Ok(Some(file))
 }
