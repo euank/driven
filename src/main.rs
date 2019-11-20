@@ -57,6 +57,10 @@ fn run() -> Result<(), i32> {
                 )
                 .arg(Arg::with_name("dir_target")),
         )
+        .subcommand(
+            SubCommand::with_name("status")
+                .about("show information about what files are in use and what variabls are exported")
+        )
         .get_matches();
 
     if flags.is_present("debug") {
@@ -75,6 +79,7 @@ fn run() -> Result<(), i32> {
     match flags.subcommand() {
         ("init", Some(init)) => handle_init(init),
         ("visit", Some(visit)) => handle_visit(visit),
+        ("status", Some(status)) => handle_status(status),
         _ => {
             println!("unrecognized subcommand");
             Err(1)
@@ -116,6 +121,10 @@ fn handle_visit(cmd: &ArgMatches) -> Result<(), i32> {
             Err(1)
         }
     }
+}
+
+fn handle_status(cmd: &ArgMatches) -> Result<(), i32> {
+    panic!("TODO")
 }
 
 fn intercept_ctrl_c() -> Result<(), ()> {

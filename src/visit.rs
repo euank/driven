@@ -8,6 +8,58 @@ use std::path::{Path};
 
 use crate::shells::Shell;
 
+struct VisitConfig {
+    topdir: Option<String>,
+    topdir_metadata: Option<FileModifiedCheck>,
+}
+
+enum FileModifiedCheck {
+    MtimeAndSize((u64, u64)),
+    MD5Sum(String),
+}
+
+impl VisitConfig {
+    fn from_env() -> Self {
+        // DRIVEN_TOPDIR just contains the path of the topdir, e.g.
+        // "__DRIVEN_TOPDIR=/home/user/foo" if the top driven file loaded was
+        // "/home/user/foo/.driven"
+        let topdir = match std::env::var("__DRIVEN_TOPDIR") {
+            Ok(s) => Some(s),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(e) => panic!("{}", e),
+        };
+        // DRIVEN_MODCHECK contains metadata to allow checking if a driven file was modified,
+        // either in the form of the mtime or md5sum of the topdir.
+        // It's a string of valid json.
+        let topdir_metadata = match std::env::var("__DRIVEN_MODCHECK") {
+            Ok(s) => {
+                if s == "" {
+                    None
+                // TODO: parse json, don't use a dumb handrolled format
+                } else if s.starts_with("1") {
+                    let parts: Vec<_> = s[1..].split(" ").collect();
+                    if parts.len() != 2 {
+                        panic!("malformed MTIME check in DRIVEN_MODCHECK");
+                    }
+                    Some(FileModifiedCheck::MtimeAndSize((parts[0].parse().unwrap(), parts[1].parse().unwrap())))
+                } else if s.starts_with("2") {
+                    Some(FileModifiedCheck::MD5Sum(s[1..].to_string()))
+                } else {
+                    // could happen on downgrade, so maybe we shouldn't panic
+                    panic!("unrecognized MODCHECK format prefix: {}", s);
+                }
+            },
+            Err(std::env::VarError::NotPresent) => None,
+            Err(e) => panic!("{}", e),
+        };
+
+        VisitConfig{
+            topdir: topdir,
+            topdir_metadata: topdir_metadata,
+        }
+    }
+}
+
 
 pub fn visit(shell: &dyn Shell, cmdfd: &mut dyn Write, dir: &str) -> Result<(), String> {
     let res = visit_helper(dir)?;
